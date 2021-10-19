@@ -38,6 +38,23 @@ class color:
 #================================================================================
 
 
+def create_dir_options(dir_in):
+    if dir_in:
+        dir_options_out = ['../'] + \
+            sorted([i for i in os.listdir(dir_in)
+                    if os.path.isdir(os.path.join(dir_in, i))]) + \
+            sorted([i for i in os.listdir(dir_in)
+                    if not os.path.isdir(os.path.join(dir_in, i))
+                    and 'DS' not in i and '.ipynb' not in i and '.py' not in i])
+    else:
+        dir_options_out = []
+
+    return(dir_options_out)
+
+#================================================================================
+#================================================================================
+#================================================================================
+
 def wait_for_downloads(dir_in='/Users/drk36/Downloads', list_in=None):
 
     print(5 * ' ' + "Waiting for downloads", end="")
@@ -367,474 +384,203 @@ def search_wos(all_db_in=None,
 #================================================================================
 
 
-def create_regex_function(df_in, regexin = None):
-    
-    search_regex = ''
-    
-    if not df_in.empty:
-        
-        if type(df_in.columns) == pd.MultiIndex:
-            df_out = df_in[['search text']].copy()
-        else:
-            wanted_cols = list(df_in.columns)
-            df_out = df_in[wanted_cols[wanted_cols.index('search text'):]].copy()
-        df_out.dropna(axis = 'index', how = 'all', inplace = True)
-        
-        if regexin == 'text':
-            df_used = df_out[('search text', regexin)].copy()
-            search_text_words = [i[0] for i in df_used.values if str(i[0]) != 'nan']
-            
-            search_text_regex = '|'.join(search_text_words)
-            search_text_regex = search_text_regex.replace('(', '\(').replace(')', '\)')
-            search_text_regex = search_text_regex.replace('[', '\[').replace(']', '\]')
-            search_text_regex = search_text_regex.replace(',', '\,').replace('.', '\.')
-            search_text_regex = search_text_regex.replace('%', '\%').replace(':', '\:')
-            search_text_regex = search_text_regex.replace('/', '\/')
-            
-            if search_regex:
-                search_regex += f'|{search_text_regex}'
-            else:
-                search_regex += search_text_regex
-                
-        if regexin == 'values':
-            df_used = df_out[('search text', regexin)].copy()
-            search_values_numbers = '(-|−)?' + ''.join([str(i) for i in df_used['numbers'] if str(i) != 'nan'])
-            search_values_connect = '|'.join([i for i in df_used['connect'] if str(i) != 'nan'])
-            search_values_connect = search_values_connect.replace('+', '\+')#.replace('±', '\±')
-            search_values_prefix = '|'.join([i for i in df_used['prefix'] if str(i) != 'nan'])
-            search_values_units = '|'.join([i for i in df_used['units'] if str(i) != 'nan'])
+def create_regex_function(data_in,
+                          highlight_values_option=False,
+                          highlight_text_option=False,
+                          count_text_option=False,
+                          ):
+
+    #––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+    search_regex = {i: '' for i in data_in.keys()}
+    count_words_out = []
+
+    #---------------
+    if highlight_values_option:
+
+        if 'values' in data_in.keys():
+            df_values = data_in['values'].copy()
+            df_values.set_index('name', drop=True, inplace=True)
+
+            #-----
+            search_values_numbers = '(-|−)?' + ''.join([str(i) for i in df_values.loc['numbers']
+                                                        if str(i) != 'nan'])
+            search_values_connect = '|'.join([i for i in df_values.loc['connect'] if str(i) != 'nan'])
+            search_values_connect = search_values_connect.replace('+', '\+')
+            search_values_prefix = '|'.join([i for i in df_values.loc['prefix'] if str(i) != 'nan'])
+            search_values_units = '|'.join([i for i in df_values.loc['units'] if str(i) != 'nan'])
             search_all_units = f'({search_values_prefix})?({search_values_units})' + \
                                f'(\s)?(GAE)?(/)?({search_values_prefix})?({search_values_units})?((-|−)1)?'
-            
+
             search_values_regex1 = f'({search_values_numbers})(\s)?({search_values_connect})?(\s)?' + \
                                    f'({search_values_numbers})?(\s)?({search_all_units})'
             search_values_regex2 = f'({search_values_numbers})(\s)?({search_values_connect})(\s)?' + \
                                    f'({search_values_numbers})'
             search_values_regex = f'({search_values_regex1}|{search_values_regex2})'
-            
-            
-            if search_regex:
-                search_regex += f'|{search_values_regex}'
-            else:
-                search_regex += search_values_regex
-            
-    return(df_out, search_regex)
+
+            search_regex['values'] = r'%s' % search_values_regex
+
+    #---------------
+    if highlight_text_option:
+        #-----
+        if 'wanted' in data_in.keys():
+            search_wanted_words = [r'%ss?' % (str(i))
+                                   for k in data_in['wanted'].columns
+                                   for i in data_in['wanted'][k] if str(i) != 'nan'
+                                   ]
+
+            search_wanted_regex = '|'.join(search_wanted_words)
+
+            search_wanted_regex = search_wanted_regex.replace('(', '\(').replace(')', '\)')
+            search_wanted_regex = search_wanted_regex.replace('[', '\[').replace(']', '\]')
+            search_wanted_regex = search_wanted_regex.replace(',', '\,').replace('.', '\.')
+            search_wanted_regex = search_wanted_regex.replace('%', '\%').replace(':', '\:')
+            search_wanted_regex = search_wanted_regex.replace(' | ', '|')
+
+            search_wanted_regex = search_wanted_regex.replace('\\[-', '[-')
+            search_wanted_regex = search_wanted_regex.replace('\\s\\]', '\\s]')
+
+            search_regex['wanted'] = r'%s' % search_wanted_regex
+
+        #-----
+        if 'unwanted' in data_in.keys():
+            search_unwanted_words = ['|'.join([r'%ss?' % (str(j)) for j in i if str(j) != 'nan'])
+                                     for i in data_in['unwanted'].values if str(i[0]) != 'nan']
+
+            search_unwanted_regex = '|'.join(search_unwanted_words)
+            search_unwanted_regex = search_unwanted_regex.replace('(', '\(').replace(')', '\)')
+            search_unwanted_regex = search_unwanted_regex.replace('[', '\[').replace(']', '\]')
+            search_unwanted_regex = search_unwanted_regex.replace(',', '\,').replace('.', '\.')
+            search_unwanted_regex = search_unwanted_regex.replace('%', '\%').replace(':', '\:')
+            search_unwanted_regex = search_unwanted_regex.replace(' | ', '|')
+
+            search_unwanted_regex = search_unwanted_regex.replace('\\[-', '[-')
+            search_unwanted_regex = search_unwanted_regex.replace('\\s\\]', '\\s]')
+
+            search_regex['unwanted'] = r'%s' % search_unwanted_regex
+
+    #---------------
+    if count_text_option:
+        count_words_out = [str(i) + 's?'
+                           for k in data_in['wanted'].columns
+                           for i in data_in['wanted'][k] if str(i) != 'nan'
+                           ]
+
+    #––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+    return(search_regex, count_words_out)
+    #––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 #================================================================================
 #================================================================================
 #================================================================================
 
 
-def read_tables_functions(options_in = None,
-                          paper_parts_in = None, 
-                          doi_in = None,
-                          product_name_in = None,
-                          db_name_in = None,
-                          file_version_in = None,
-                          tables_out = False,
-                          hide_webdriver_in = True,
-                          highlight_regex_in = None,
-                          html_dir_out = None):
+def read_soup_function(url_in,
+                       hide_webdriver_in=True,
+                       web_options_in=None,
+                       ):
 
-    #---------------------------------------------
-    if doi_in:
-        doi_used = doi_in[doi_in.find('-') + 2:]
-    else:
-        doi_used = doi_in
+    soup_out = None
+    soup_url = None
+    success_out = False
 
-    prefix_used = ''
-    if 'm_' in doi_in[:2]:
-        doi_index = int(doi_in[2:doi_in.find('-') - 1])
-        prefix_used = 'm_'
-    else:
-        doi_index = int(doi_in[:doi_in.find('-') - 1])
-    
-    main_url = f"http://doi.org/{doi_used}"
-    
-    product_dir = f'./output_files/_{product_name_in}/'
-    input_xlfiles_dir = product_dir + '01_read_xlfiles/'
-    # input_xlfiles_dir = product_dir + 'input_xlfiles/'
-    input_xlfile_name = f'{product_name_in}_v{file_version_in}_{db_name_in}_' + \
-                        f'Paper_{prefix_used}%03d.xlsx'%(doi_index)
+    #-------------------------
+    if url_in:
+        if 'http' in url_in:
+            url_used = url_in
+        else:
+            url_used = f'http://doi.org/{url_in}'
 
+        #-----
+        hide_webdriver = hide_webdriver_in
 
-    if not options_in:
-        options_in = webdriver.ChromeOptions()
-        if hide_webdriver_in:
-            options_in.add_argument('-headless')
-        options_in.add_argument('--ignore-certificate-errors')
-        options_in.add_argument('--incognito')
+        if web_options_in:
+            webdriver_options = web_options_in
+        else:
+            webdriver_options = webdriver.ChromeOptions()
+            if hide_webdriver:
+                webdriver_options.add_argument('-headless')
+            webdriver_options.add_argument('--ignore-certificate-errors')
+            webdriver_options.add_argument('--incognito')
 
-    table_soups = []
-    tables_list = []
-    
-    #------------------------------------------------
-    # Get soup of paper from the publisher's website
-    #------------------------------------------------
-    success_option = False
+        #--------------------------------------------------
+        # Get soup of paper from the publisher's website
+        #--------------------------------------------------
 
-    print(color.BOLD, color.BLUE, 100*'-', color.END)
-    print(f'{color.BOLD}{color.BLUE}  Starting try to read paper {prefix_used}{doi_index}!{color.END}\n')
+        print(color.BOLD, color.BLUE, 100 * '-', color.END)
+        print(f'{color.BOLD}{color.BLUE}  Starting try to read paper ' +
+              f'{url_in}!{color.END}\n')
 
-    #---------------------------------------------
-    driver = webdriver.Chrome(options = options_in)
-    driver.get(main_url)
-    time.sleep(3)
+        #---------------
+        driver = webdriver.Chrome(options=webdriver_options)
+        driver.get(url_used)
+        time.sleep(3)
 
-    #---------------------------------------------
-    accept_xpath = '//a[text()="Accept"]'
-    if driver.find_elements_by_xpath(accept_xpath):
-        try:
+        #---------------
+        accept_xpath = '//a[text()="Accept"]'
+        if driver.find_elements_by_xpath(accept_xpath):
+            try:
+                wait = WebDriverWait(driver, 10)
+                wait.until(EC.element_to_be_clickable((By.XPATH, accept_xpath)))
+                driver.find_element_by_xpath(accept_xpath).click()
+            except:
+                pass
+
+        #---------------
+        accept2_xpath = '//button[text()="Accept Cookies"]'
+        if driver.find_elements_by_xpath(accept2_xpath):
+            try:
+                wait = WebDriverWait(driver, 10)
+                wait.until(EC.element_to_be_clickable((By.XPATH, accept2_xpath)))
+                driver.find_element_by_xpath(accept2_xpath).click()
+            except:
+                pass
+
+        #---------------
+        allow_xpath = '//a[class="optanon-allow-all"]'
+        if driver.find_elements_by_xpath(allow_xpath):
             wait = WebDriverWait(driver, 10)
-            wait.until(EC.element_to_be_clickable((By.XPATH, accept_xpath)))
-            driver.find_element_by_xpath(accept_xpath).click()
-        except:
-            pass
+            wait.until(EC.element_to_be_clickable((By.XPATH, allow_xpath)))
+            driver.find_element_by_xpath(allow_xpath).click()
 
-    #---------------------------------------------
-    accept2_xpath = '//button[text()="Accept Cookies"]'
-    if driver.find_elements_by_xpath(accept2_xpath):
-        try:
+        #---------------
+        view_xpath = '//a[text()="View Full-Text"]'
+        if driver.find_elements_by_xpath(view_xpath):
             wait = WebDriverWait(driver, 10)
-            wait.until(EC.element_to_be_clickable((By.XPATH, accept2_xpath)))
-            driver.find_element_by_xpath(accept2_xpath).click()
-        except:
-            pass
+            wait.until(EC.element_to_be_clickable((By.XPATH, view_xpath)))
+            driver.find_element_by_xpath(view_xpath).click()
 
-    #---------------------------------------------
-    allow_xpath = '//a[class="optanon-allow-all"]'
-    if driver.find_elements_by_xpath(allow_xpath):
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.element_to_be_clickable((By.XPATH, allow_xpath)))
-        driver.find_element_by_xpath(allow_xpath).click()
-    #---------------------------------------------
-    view_xpath = '//a[text()="View Full-Text"]'
-    if driver.find_elements_by_xpath(view_xpath):
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.element_to_be_clickable((By.XPATH, view_xpath)))
-        driver.find_element_by_xpath(view_xpath).click()
+        time.sleep(2)
 
-    view2_xpath = '//a[text()="Full Text"]'
-    if driver.find_elements_by_xpath(view2_xpath):
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.element_to_be_clickable((By.XPATH, view2_xpath)))
-        driver.find_element_by_xpath(view2_xpath).click()
+        #-------------------------
+        soup_url = driver.current_url
+        print(f'\t{color.BOLD}{color.RED}URL: {color.END}', soup_url, '\n')
 
+        if '.pdf' in soup_url:
+            comment_out += 'pdf_file | '
 
-    time.sleep(2)    
+        else:
 
+            #---------------
+            if 'oeno-one' in soup_url:
+                expand_css = 'a[class*="tab-expand"]'
+                tab_ex_els = driver.find_elements_by_css_selector(expand_css)
+                if tab_ex_els:
+                    for itabex in range(len(tab_ex_els)):
+                        tab_ex_els[itabex].click()
+                        time.sleep(0.5)
 
-    #-----------------------------------------------------------------
-    #-----------------------------------------------------------------
-    #-----------------------------------------------------------------
+            #---------------
+            soup_html = driver.execute_script('return document.documentElement.outerHTML')
+            soup_out = BeautifulSoup(soup_html, "html.parser")
 
-    soup_url = driver.current_url
-    print(f'\t{color.BOLD}{color.BLUE}URL: {color.END}', soup_url, '\n')
-    # if '.pdf' in soup_url:
-    #     comment_output = 'pdf_file'
+            success_out = True
 
-    #---------------------------------------------
-    if 'oeno-one' in soup_url:
-        expand_css = 'a[class*="tab-expand"]'
-        tab_ex_els = driver.find_elements_by_css_selector(expand_css)
-        if tab_ex_els:
-            for itabex in range(len(tab_ex_els)):
-                tab_ex_els[itabex].click()
-                time.sleep(0.5)
-
-    #---------------------------------------------
-    soup_html = driver.execute_script('return document.documentElement.outerHTML')
-    soup_paper = BeautifulSoup(soup_html, "html.parser")
-    
-    #---------------------------------------------
-    publisher_list = [ikey for ikey in paper_parts_in.keys() if ikey in soup_url]
-    if not publisher_list:
-        publisher_list = ['general']
-    paper_parts_temp = paper_parts_in[publisher_list[0]].fillna('')
-    
-    paper_parts_temp['temp_col'] = 'temp'
-    paper_parts_new = \
-    paper_parts_temp.groupby('temp_col', sort = False, as_index = False).agg(', '.join)
-    paper_parts_new.drop(columns = 'temp_col', inplace = True)
-    paper_parts_new.replace(regex = r'\, \, \, $', value = '', inplace = True)
-    
-    # if tables_out:
-    #     success_option = True
-    
-    #---------------------------------------------
-    #---------------------------------------------
-    if highlight_regex_in and html_dir_out:
-        title_temp = soup_paper.select(paper_parts_new['title'][0])
-        abstract_temp = soup_paper.select(paper_parts_new['abstract'][0])
-        main_paper_temp = soup_paper.select(paper_parts_new['body'][0])
-        #
-        paper_temp = title_temp + abstract_temp + main_paper_temp
-        soup_temp = BeautifulSoup('\n\n'.join(str(part) for part in paper_temp), 'html.parser')
-        #
-        html_out = False
-
-        for par in soup_temp.select(paper_parts_new['paragraph'][0]):
-            # highlight_regex_in = '(((-|−)?\\d+(?:\\.\\d+)?)(\\s)?(-|–|—|\\+|\\±|to|and|or)?(\\s)?((-|−)?\\d+(?:\\.\\d+)?)?(\\s)?((m|μ|n|k)?(g|l|ppm|ppb|min)(\\s)?(GAE)?(/)?(m|μ|n|k)?(g|l|ppm|ppb|min)?((-|−)1)?)|((-|−)?\\d+(?:\\.\\d+)?)(\\s)?(-|–|—|\\+|\\±|to|and|or)(\\s)?((-|−)?\\d+(?:\\.\\d+)?))'
-            if re.search(f'({highlight_regex_in})', par.text):
-                html_out = True
-                highlighted_text = \
-                BeautifulSoup(re.sub(f'({highlight_regex_in})', 
-                                     r'<mark>\1</mark>', 
-                                     par.text, 
-                                     flags = re.I), 
-                              'html.parser')
-                par.replace_with(highlighted_text)
-        #
-        if html_out:
-            html_file_out = f'{html_dir_out}/' + \
-                            f'{product_name_in}_v{file_version_in}_{db_name_in}_' + \
-                            f'Paper_{prefix_used}%03d.html'%(doi_index)
-            with open(html_file_out, 'w') as file:
-                file.write(str(soup_temp))
-    
-    #---------------------------------------------
-    #---------------------------------------------
-    if tables_out:
-        try:
-            main_paper = soup_paper.select(paper_parts_new['body'][0])[0]
-            #------------------------------
-            if 'springer' in soup_url or 'nature' in soup_url:
-                # close webdriver
-                driver.close()
-                # get the links for all the tables found
-                hrefs_all = main_paper.find_all(href = True)
-                tab_urls = [soup_url[:soup_url.find('/article')] + hr['href'] 
-                            for hr in hrefs_all if '/table' in hr['href']]
-                # print(tab_urls)
-                # keep only unique links of tables
-                tab_urls = list(np.unique(tab_urls))
-                #-----
-                # loop over links of tables to read info with BeautifulSoup
-                if tab_urls:
-                    print(f'\t{color.BOLD}{color.BLUE}Tables found!!!{color.END}')
-                    for itab, tab_url in enumerate(tab_urls):
-                        tab_driver = webdriver.Chrome(options = options_in)
-                        tab_driver.get(tab_url)
-
-                        time.sleep(3)
-
-                        # get soup of table
-                        try:
-                            tab_html = tab_driver.execute_script('return document.documentElement.outerHTML')
-                            tab_soup_temp = BeautifulSoup(tab_html, "html.parser")
-                            tab_soup = tab_soup_temp.select(paper_parts_new['table'][0])[0]
-                            table_soups.append(tab_soup)
-                            tab_driver.close() # close table webdriver and continue to next one
-                        except:
-                            # close table webdriver and continue to next one
-                            tab_driver.close()
-                            continue
-
-            #------------------------------
-            elif 'hindawi' in soup_url:
-                driver.close()
-                # get the links for the tables found
-                hrefs_all = main_paper.find_all(href = True)
-                tab_urls = [soup_url + hr['href'] for hr in hrefs_all
-                            if 'tab' in hr['href'] and len(hr['href']) <=6]
-                # keep only unique links of tables
-                tab_urls = list(np.unique(tab_urls))
-                #-----
-                # loop over links of tables to read info with BeautifulSoup
-                if tab_urls:
-                    print(f'\t{color.BOLD}{color.BLUE}Tables found!!!{color.END}')
-                    for itab, tab_url in enumerate(tab_urls):
-                        tab_driver = webdriver.Chrome(options = options_in)
-                        tab_driver.get(tab_url)
-
-                        time.sleep(3)
-
-                        # get soup of table
-                        tab_html = tab_driver.execute_script('return document.documentElement.outerHTML')
-                        tab_soup_temp = BeautifulSoup(tab_html, "html.parser")
-                        tab_soup = tab_soup_temp.select(paper_parts_new['table'][0])[0]
-                        table_soups.append(tab_soup)
-
-                        # close table webdriver and continue to next one
-                        tab_driver.close()
-
-            #------------------------------
-            elif 'mdpi.com' in soup_url:
-                # get all table elements from paper soup to click on
-                tab_css = 'img[alt="Table"]'
-                tab_els = driver.find_elements_by_css_selector(tab_css)
-                #-----
-                # loop over table elements to read info with BeautifulSoup
-                if tab_els:
-                    print(f'\t{color.BOLD}{color.BLUE}Tables found!!!{color.END}')
-                    for itab in range(len(tab_els)):
-                        # click on table element to read its info with BeautifulSoup
-                        tab_els[itab].click()
-                        time.sleep(1) 
-                        tab_html = driver.execute_script('return document.documentElement.outerHTML')
-                        tab_soup_temp = BeautifulSoup(tab_html, "html.parser")
-                        tab_soup = tab_soup_temp.select(paper_parts_new['table'][0])[0]
-                        table_soups.append(tab_soup)
-
-                        # close table tab to continue to next element
-                        close_tab = 'button[class*="mfp-close"]'
-                        if driver.find_elements_by_css_selector(close_tab):
-                            wait = WebDriverWait(driver, 10)
-                            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, close_tab)))
-                            driver.find_element_by_css_selector(close_tab).click()
-                            time.sleep(1)
-                # close webdriver
-                driver.close()
-
-            #------------------------------
-            elif 'tandfonline' in soup_url:
-
-                tab_xpath = '//a[text()="Display Table"]'
-                tab_els = driver.find_elements_by_xpath(tab_xpath)
-
-                close_css = 'i[title="Close Table Viewer"]'
-
-                #-----
-                if tab_els:
-                    print(f'\t{color.BOLD}{color.BLUE}Tables found!!!{color.END}')
-                    for itab in range(len(tab_els)):
-                        tab_els[itab].click()
-                        time.sleep(1)
-
-                        tab_html = driver.execute_script('return document.documentElement.outerHTML')
-                        tab_soup_temp = BeautifulSoup(tab_html, "html.parser")
-                        tab_soup = tab_soup_temp.select(paper_parts_new['table'][0])[0]
-
-                        table_soups.append(tab_soup)
-
-                        if driver.find_elements_by_css_selector(close_css):
-                            wait = WebDriverWait(driver, 10)
-                            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, close_css)))
-                            driver.find_element_by_css_selector(close_css).click()
-                            time.sleep(1)
-                driver.close()
-
-            #------------------------------
-            else:
-                driver.close()
-                table_soups = main_paper.select(paper_parts_new['table'][0])
-                #-----
-                if table_soups:
-                    print(f'\t{color.BOLD}{color.BLUE}Tables found!!!{color.END}')
-
-
-            #-----------------------------------------------------------------
-            #-----------------------------------------------------------------
-            #-----------------------------------------------------------------
-
-            if table_soups:
-                print()
-                for itab, tab_soup in enumerate(table_soups):
-                    try:
-                        tab_dict = {}
-                        tab_temp = pd.read_html(str(tab_soup))
-                        tab_new = pd.DataFrame()
-                        for tab in tab_temp:
-                            if type(tab.columns) == pd.MultiIndex:
-                                cols_new = [' - '.join(np.unique([j.replace('\xa0', ' ') 
-                                                                    for j in i 
-                                                                    if 'Unnamed' not in j])[::-1]) 
-                                            for i in tab.columns]
-                                tab.columns = cols_new
-                            tab_new = pd.concat([tab_new, tab], axis = 0)
-                        tab_dict['data'] = tab_new
-                    except:
-                        continue
-
-                    try:
-                        header_soup = tab_soup.select(paper_parts_new['table_header'][0])
-                        header_text = [i.text.replace('\n', ' ').replace('\xa0', ' ')\
-                                       .replace('\u2009', ' ').replace('            ', '').strip()
-                                       for i in header_soup]
-                        tab_dict['title'] = header_text[0]
-                    except:
-                        tab_dict['title'] = 'NO TITLE'
-
-                    try:
-                        footer_soup = tab_soup.select(paper_parts_new['table_footer'][0])
-                        footer_text = [i.text.replace('\n', ' ').replace('\xa0', ' ')\
-                                       .replace('\u2009', ' ').replace('            ', '').strip()
-                                       for i in footer_soup]
-                        tab_dict['footer'] = footer_text[0]
-                    except:
-                        tab_dict['footer'] = 'NO FOOTER'
-
-                    tables_list.append(tab_dict)
-            else:
-                print(f'\t{color.BOLD}{color.RED}NO Tables found!!! ' + \
-                      f'Make sure you have full access!!!{color.END}\n')
-                
-            extras = soup_paper.select('div[class="Extras"]')
-            if extras:
-                print(f'\t{color.BOLD}{color.RED}Extra files found in paper!!!{color.END}')
-                # comment_output = 'extra_files'
-
-            success_option = True
-
-        except:
-            driver.close()
-            print(f'{color.BOLD}{color.RED}  Try Failed!!!{color.END}')
-            # comment_output = 'retry'
-
-
-        #============================================================
-
-        if tables_list:
-
-            for itab, table_used in enumerate(tables_list):
-
-                #======
-                tab_temp = df_remove_row_col_names_function(table_used, display_option = False)
-
-                #======
-                if tab_temp.size == 1:
-                    continue
-
-                #======
-                if doi_used:
-                    tab_temp.rename_axis(doi_used, axis = "index", inplace = True)
-
-                results_df = tab_temp.copy()
-                # display(results_df)
-
-                #======
-                # df_to_excel_function(f'{input_xlfiles_dir}/v{file_version_in}/{input_xlfile_name}', 
-                #                      results_df, 
-                #                      sheet_name_in = f'Table_{itab}')
-
-                df_to_excel_function_new(io_in = f'{input_xlfiles_dir}/v{file_version_in}/{input_xlfile_name}', 
-                                         sheetname_in = f'Table_{itab}',
-                                         df_in = results_df)
-
-            print(f'\t{color.BOLD}{color.RED}Tables exported successfully!!!{color.END}\n')
-    
-    else:
+        #-------------------------
         driver.close()
 
-    if success_option:
-        print(f'{color.BOLD}{color.BLUE}  Try Successful!!!{color.END}\n')
-
-    if len(table_soups) == 0 and '.pdf' in soup_url:
-        comment_output = 'pdf_file'
-    elif len(table_soups) > 0 and len(table_soups) == len(tables_list):
-        comment_output = 'successful'
-    else:
-        comment_output = 'retry'
-    if 'extras' in locals() and extras:
-        comment_output = 'extra_files'
-        
-    #============================================================
-    
-    return(input_xlfile_name, doi_used, success_option, len(table_soups), len(tables_list), 
-           soup_paper, comment_output)
-
+    #-------------------------
+    return(soup_url, soup_out, success_out)
 
 #================================================================================
 #================================================================================
 #================================================================================
-
