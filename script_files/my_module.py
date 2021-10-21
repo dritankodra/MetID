@@ -14,6 +14,9 @@ from selenium.webdriver import DesiredCapabilities
 
 from bs4 import BeautifulSoup
 
+import openpyxl
+from openpyxl.utils.dataframe import dataframe_to_rows
+
 #================================================================================
 #================================================================================
 #================================================================================
@@ -580,6 +583,108 @@ def read_soup_function(url_in,
 
     #-------------------------
     return(soup_url, soup_out, success_out)
+
+#================================================================================
+#================================================================================
+#================================================================================
+
+def add_counts_function(df_in):
+
+    if not df_in.empty:
+
+        df_out = df_in.copy()
+
+        if 'col_count' in df_out.index:
+            start_row = 1
+        else:
+            start_row = 0
+
+        if all([i.isnumeric() for j in df_out.iloc[start_row:, 2:].replace('', '0').values for i in j]):
+            df_type = 'numeric'
+        else:
+            df_type = 'text'
+
+        if 'row_count' not in df_out.columns:
+            if df_type == 'numeric':
+                df_out.iloc[start_row:, 2:] = df_out.iloc[start_row:, 2:].replace('', 0).astype('int32')
+                df_out['row_count'] = df_out.iloc[start_row:, 2:].astype(bool).sum(axis=1)
+            elif df_type == 'text':
+                df_out['row_count'] = \
+                    [len([j for j in df_out.iloc[i, 2:].values if j != '']) for i in range(df_out.shape[0])]
+
+        df_out = df_out[df_out['row_count'].values > 0.]
+
+        if df_type == 'numeric':
+            count_list = list(df_out.iloc[start_row:, 2:].astype(bool)
+                                                         .sum(axis=0))
+
+        elif df_type == 'text':
+            count_list = \
+                [len([j for j in df_out.iloc[start_row:, i].values if j != ''])
+                 for i in range(2, df_out.shape[1] - 1)] + \
+                [df_out.iloc[start_row:, -1].astype('int32').astype(bool).sum()]
+
+        df_out.loc['col_count'] = ['', ''] + count_list
+        df_out = df_out.reindex(index=['col_count'] + [i for i in df_out.index if i != 'col_count'])
+
+        return(df_out)
+
+#================================================================================
+#================================================================================
+#================================================================================
+
+def df_to_excel_function_new(io_in, sheetname_in, df_in, emptyrows_in = 2):
+    """
+    Check if sheet exists for an xlsx spreadsheet and add data from dataframe to the sheet
+    :param: io_in - The io_in of the xlsx spreadsheet
+    :param: sheetname_in - Name of the worksheet to search for
+    :param: df_in - A Pandas dataframe object
+    
+    """
+    #----------
+    if not os.path.exists(io_in):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = sheetname_in
+    #-----
+    else:
+        wb = openpyxl.load_workbook(io_in)
+    
+    
+    #----------
+    try:
+        ws = wb[sheetname_in]
+    
+    #-----
+    except KeyError:
+        wb.create_sheet(sheetname_in)
+        ws = wb[sheetname_in]
+    
+    #-----
+    finally:
+        maxrow = wb[sheetname_in].max_row
+        
+        # append empty rows to excel sheet if sheet not empty
+        if maxrow > 1:
+            df_empty = pd.DataFrame(index = [f'temp{i}' for i in range(emptyrows_in)], 
+                                    columns = df_in.columns)
+            for r in dataframe_to_rows(df_empty, index = False, header = False):
+                ws.append(r)
+                
+            maxrow += emptyrows_in + 1
+        
+        # append dataframe rows
+        for ir, r in enumerate(dataframe_to_rows(df_in, index = True, header = True)):
+            if ir != 1:
+                ws.append(r)
+
+        ws.cell(column = 1, row = maxrow, value = df_in.index.name)
+            
+        # change "index" and "columns" styling
+        for cell in ws['A'][-df_in.shape[0]:] + ws[maxrow]:
+            cell.style = 'Pandas'
+        
+        wb.save(io_in)
 
 #================================================================================
 #================================================================================
